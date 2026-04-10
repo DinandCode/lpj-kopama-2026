@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">    <title>LPJ KOPAMA 2026 - Flipbook</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.min.js"></script>
+
+    <style>
+        :root { --primary: #e67e22; --bg: #121212; }
+        
+        body { 
+            background: var(--bg); margin: 0; overflow: auto; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            -webkit-user-select: none; user-select: none;
+        }
+        #book {
+    transform-origin: center center;
+    transition: transform 0.1s ease;
+}
+
+        #viewer-container { 
+            width: 100vw; height: 100vh; 
+            display: flex; justify-content: center; align-items: center; 
+            position: relative; transition: filter 0.4s ease;
+            touch-action: manipulation;
+        }
+
+        canvas {
+            image-rendering: auto;
+            backface-visibility: hidden;
+            width: 100% !important;
+            height: 100% !important;
+            display: block;
+            touch-action: pinch-zoom;
+        }
+
+        .watermark {
+            position: fixed; top: 50%; left: 50%;
+            transform: translate(-50%, -50%) rotate(-45deg);
+            font-size: 5vw; color: rgba(255, 255, 255, 0.05);
+            pointer-events: none; white-space: nowrap;
+            z-index: 150; text-transform: uppercase;
+        }
+
+        #access-denied {
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            color: white; text-align: center; background: var(--bg);
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 2000;
+        }
+
+        .countdown-container { margin: 20px 0; display: flex; gap: 15px; }
+        .count-box {
+            background: rgba(230, 126, 34, 0.1);
+            border: 1px solid rgba(230, 126, 34, 0.3);
+            padding: 15px; border-radius: 10px; min-width: 65px;
+        }
+        .count-num { display: block; font-size: 1.8em; font-weight: bold; color: var(--primary); }
+        .count-label { font-size: 0.7em; opacity: 0.7; text-transform: uppercase; }
+
+        .time-badge { 
+            background: rgba(255,255,255,0.05); color: #fff; 
+            padding: 8px 20px; border-radius: 50px; 
+            border: 1px solid rgba(255,255,255,0.1); margin-top: 15px; font-size: 0.85em;
+        }
+
+        .flip-book { 
+            box-shadow: 0 0 50px rgba(0,0,0,0.8); 
+            display: none; background: #fff;
+            transform: translateZ(0);
+            backface-visibility: hidden;
+            will-change: transform;
+        }
+
+        .page { 
+            background-color: white; 
+            overflow: hidden; 
+            backface-visibility: hidden;
+            transform: translateZ(0);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .nav-area { position: absolute; top: 0; width: 20%; height: 100%; z-index: 100; cursor: pointer; }
+        .nav-left { left: 0; } .nav-right { right: 0; }
+
+        #page-info { 
+            position: absolute; bottom: 30px; background: rgba(0,0,0,0.7); 
+            color: white; padding: 8px 18px; border-radius: 20px; 
+            font-size: 14px; z-index: 110; display: none; 
+        }
+        
+        #loading { color: white; position: absolute; z-index: 500; text-align: center; }
+        
+        @media print { body { display: none !important; } }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+
+<audio id="flip-sound" src="page-flip-01a.mp3" preload="auto"></audio>
+
+<div class="watermark">LPJ KOPAMA 2026 </div>
+
+<div id="access-denied">
+    <div style="font-size:60px; margin-bottom: 10px;">🔒</div>
+    <h1 id="status-title">Akses Terbatas</h1>
+    <p id="status-msg" style="opacity: 0.8; max-width: 80%;">Akses Dokumen Tersedia Pada...</p>
+
+    <div class="countdown-container" id="countdown-timer">
+        <div class="count-box"><span class="count-num" id="d">00</span><span class="count-label">Hari</span></div>
+        <div class="count-box"><span class="count-num" id="h">00</span><span class="count-label">Jam</span></div>
+        <div class="count-box"><span class="count-num" id="m">00</span><span class="count-label">Menit</span></div>
+        <div class="count-box"><span class="count-num" id="s">00</span><span class="count-label">Detik</span></div>
+    </div>
+
+    <div id="schedule-text" class="time-badge">Akses Dokumen Belum Tersedia...</div>
+    <p style="margin-top:20px; font-size: 0.75em; opacity: 0.4;">Waktu Sistem: <span id="clock">--:--:--</span></p>
+</div>
+
+<div id="viewer-container">
+    <div id="loading">Mempersiapkan Dokumen... <br><span id="percent" style="font-weight:bold; color:var(--primary);">0%</span></div>
+    
+    <div class="nav-area nav-left" id="prev-zone" title="Halaman Sebelumnya"></div>
+    <div class="nav-area nav-right" id="next-zone" title="Halaman Berikutnya"></div>
+    <div id="page-info"><span id="page-num">1</span> / <span id="page-count"></span></div>
+    <div class="flip-book" id="book"></div>
+</div>
+
+<script>
+const CONFIG = {
+    pdfPath: "docs/LPJ REVISI 2026 E-MAGEZINE_compressed.pdf", 
+    tanggalAkses: "2026-04-10", 
+    jamBuka: "23:51",
+    jamTutup: "23:59"
+};
+
+let isStarted = false;
+let pdfDoc = null;
+let pageFlip = null;
+const flipSound = document.getElementById('flip-sound');
+
+document.getElementById('schedule-text').innerText = `Jadwal: ${CONFIG.tanggalAkses} | ${CONFIG.jamBuka} - ${CONFIG.jamTutup} WIB`;
+
+// Blur Protection
+window.addEventListener('blur', () => { document.getElementById('viewer-container').style.filter = 'blur(60px)'; });
+window.addEventListener('focus', () => { document.getElementById('viewer-container').style.filter = 'none'; });
+
+// Shortcut Block
+document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey && (e.key === 's' || e.key === 'p' || e.key === 'u')) || e.key === 'F12' || e.key === 'PrintScreen') {
+        e.preventDefault();
+        alert('Aksi ini dilarang demi keamanan dokumen.');
+    }
+});
+
+function tick() {
+    const now = new Date();
+    const openTime = new Date(`${CONFIG.tanggalAkses}T${CONFIG.jamBuka}:00`);
+    const closeTime = new Date(`${CONFIG.tanggalAkses}T${CONFIG.jamTutup}:00`);
+    
+    document.getElementById('clock').innerText = now.toLocaleTimeString('id-ID');
+    const canAccess = (now >= openTime && now < closeTime);
+
+    if (canAccess) {
+        document.getElementById('access-denied').style.display = 'none';
+        if (!isStarted) {
+            isStarted = true;
+            initFlipbook();
+        }
+    } else {
+        document.getElementById('access-denied').style.display = 'flex';
+        const diff = openTime - now;
+        if (diff > 0) {
+            document.getElementById('d').innerText = String(Math.floor(diff / (1000*60*60*24))).padStart(2, '0');
+            document.getElementById('h').innerText = String(Math.floor((diff % (1000*60*60*24)) / (1000*60*60))).padStart(2, '0');
+            document.getElementById('m').innerText = String(Math.floor((diff % (1000*60*60)) / (1000*60))).padStart(2, '0');
+            document.getElementById('s').innerText = String(Math.floor((diff % (1000*60)) / 1000)).padStart(2, '0');
+        } else {
+            document.getElementById('countdown-timer').style.display = 'none';
+            document.getElementById('status-title').innerText = "Akses Ditutup";
+        }
+    }
+}
+
+const pdfjsLib = window['pdfjs-dist/build/pdf'];
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+// Fungsi Render dengan Status Percent
+async function renderPage(pageNum, div) {
+    if (div.getAttribute('data-loaded') === 'true') return;
+    
+    const page = await pdfDoc.getPage(pageNum);
+    const isMobile = window.innerWidth < 768;
+    const viewport = page.getViewport({ scale: isMobile ? 1.0 : 1.5 });
+    
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+    
+    await page.render({ canvasContext: context, viewport: viewport }).promise;
+    div.innerHTML = '';
+    div.appendChild(canvas);
+    div.setAttribute('data-loaded', 'true');
+}
+
+async function initFlipbook() {
+    try {
+        const loadingTask = pdfjsLib.getDocument(CONFIG.pdfPath);
+        
+        // Memantau loading progress file PDF
+        loadingTask.onProgress = function(progress) {
+            const percent = Math.round((progress.loaded / progress.total) * 100);
+            document.getElementById('percent').textContent = percent + '%';
+            if (percent >= 100) {
+                document.getElementById('loading').innerHTML = "Menyiapkan Tampilan...";
+            }
+        };
+
+        pdfDoc = await loadingTask.promise;
+        
+        const bookContainer = document.getElementById('book');
+        const isMobile = window.innerWidth < 768;
+        
+        const firstPage = await pdfDoc.getPage(1);
+        const vp0 = firstPage.getViewport({ scale: 1 });
+        const ratio = vp0.width / vp0.height;
+
+        let bW = isMobile ? window.innerWidth * 0.95 : Math.min((window.innerHeight * 0.9) * ratio, 900);
+        let bH = bW / ratio;
+
+        document.getElementById('page-count').textContent = pdfDoc.numPages;
+
+        // Inisialisasi DOM halaman
+        for (let i = 1; i <= pdfDoc.numPages; i++) {
+            const pageDiv = document.createElement('div');
+            pageDiv.className = 'page';
+pageDiv.innerHTML = '';
+            bookContainer.appendChild(pageDiv);
+        }
+
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('page-info').style.display = 'block';
+        bookContainer.style.display = 'block';
+
+        pageFlip = new St.PageFlip(bookContainer, {
+            width: bW, height: bH, size: "fixed",
+            usePortrait: true, showCover: false, flippingTime: 800,
+            drawShadow: true
+        });
+
+        pageFlip.loadFromHTML(document.querySelectorAll(".page"));
+
+        // Langsung render 2 halaman awal
+        const pagesDom = document.querySelectorAll('.page');
+        await renderPage(1, pagesDom[0]);
+        if(pdfDoc.numPages > 1) await renderPage(2, pagesDom[1]);
+
+        // EVENT: Saat Halaman Berubah
+        pageFlip.on('flip', async (e) => {
+            const currentIdx = e.data;
+            document.getElementById('page-num').textContent = currentIdx + 1;
+            
+            flipSound.currentTime = 0;
+            flipSound.play().catch(() => {});
+
+            // Lazy Load cerdas: Render 1 halaman sebelum dan 2 halaman sesudah
+const toLoad = [
+    currentIdx - 2,
+    currentIdx - 1,
+    currentIdx,
+    currentIdx + 1,
+    currentIdx + 2,
+    currentIdx + 3
+];            toLoad.forEach(idx => {
+                if(idx >= 0 && idx < pdfDoc.numPages) {
+                    renderPage(idx + 1, pagesDom[idx]);
+                }
+            });
+        });
+
+        document.getElementById('prev-zone').addEventListener('click', () => pageFlip.flipPrev());
+        document.getElementById('next-zone').addEventListener('click', () => pageFlip.flipNext());
+
+    } catch (err) {
+        document.getElementById('loading').innerHTML = "<b style='color:red;'>Gagal Memuat!</b><br>Pastikan file tersedia.";
+        console.error(err);
+    }
+}
+
+setInterval(tick, 1000);
+tick();
+</script>
+<script>
+let scale = 1;
+let initialDistance = null;
+
+const book = document.getElementById('book');
+
+function getDistance(touches) {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+document.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+        initialDistance = getDistance(e.touches);
+    }
+});
+
+document.addEventListener('touchmove', (e) => {
+    if (e.touches.length === 2 && initialDistance) {
+        e.preventDefault();
+
+        let currentDistance = getDistance(e.touches);
+        let zoomFactor = currentDistance / initialDistance;
+
+        let newScale = scale * zoomFactor;
+
+        // Batasi zoom
+        newScale = Math.max(1, Math.min(newScale, 3));
+
+        book.style.transform = `scale(${newScale})`;
+    }
+}, { passive: false });
+
+document.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) {
+        scale = parseFloat(book.style.transform.replace(/scale\((.*?)\)/, '$1')) || scale;
+        initialDistance = null;
+    }
+});
+</script>
+<script src="https://unpkg.com/screenshot-privacy-protect/dist/privacy-protect.min.js"></script>
+<script>
+    PrivacyProtect.enable({
+        feedback: true,
+        watermarkText: "🔒 LPJ KOPAMA 2026 - RAHASIA",
+        blurOnCapture: true
+    });
+</script>
+</body>
+</html>
