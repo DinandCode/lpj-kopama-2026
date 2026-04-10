@@ -2,7 +2,8 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">    <title>LPJ KOPAMA 2026 - Flipbook</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>LPJ KOPAMA 2026 - Flipbook</title>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.min.js"></script>
@@ -15,10 +16,11 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
             -webkit-user-select: none; user-select: none;
         }
+        
         #book {
-    transform-origin: center center;
-    transition: transform 0.1s ease;
-}
+            transform-origin: center center;
+            transition: transform 0.1s ease;
+        }
 
         #viewer-container { 
             width: 100vw; height: 100vh; 
@@ -187,20 +189,26 @@ function tick() {
 const pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
-// Fungsi Render dengan Status Percent
+// Fungsi Render yang Dioptimasi (Pre-render)
 async function renderPage(pageNum, div) {
     if (div.getAttribute('data-loaded') === 'true') return;
     
     const page = await pdfDoc.getPage(pageNum);
     const isMobile = window.innerWidth < 768;
-    const viewport = page.getViewport({ scale: isMobile ? 1.0 : 1.5 });
+    // Scale 1.5 - 2.0 direkomendasikan agar tajam saat di-zoom
+    const viewport = page.getViewport({ scale: isMobile ? 1.5 : 2.0 });
     
     const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
+    const context = canvas.getContext('2d', { alpha: false }); // Optimasi performa
     canvas.height = viewport.height;
     canvas.width = viewport.width;
     
-    await page.render({ canvasContext: context, viewport: viewport }).promise;
+    await page.render({ 
+        canvasContext: context, 
+        viewport: viewport,
+        intent: 'display'
+    }).promise;
+    
     div.innerHTML = '';
     div.appendChild(canvas);
     div.setAttribute('data-loaded', 'true');
@@ -210,17 +218,14 @@ async function initFlipbook() {
     try {
         const loadingTask = pdfjsLib.getDocument(CONFIG.pdfPath);
         
-        // Memantau loading progress file PDF
         loadingTask.onProgress = function(progress) {
-            const percent = Math.round((progress.loaded / progress.total) * 100);
-            document.getElementById('percent').textContent = percent + '%';
-            if (percent >= 100) {
-                document.getElementById('loading').innerHTML = "Menyiapkan Tampilan...";
+            if (progress.total > 0) {
+                const percent = Math.round((progress.loaded / progress.total) * 100);
+                document.getElementById('percent').textContent = percent + '%';
             }
         };
 
         pdfDoc = await loadingTask.promise;
-        
         const bookContainer = document.getElementById('book');
         const isMobile = window.innerWidth < 768;
         
@@ -228,57 +233,48 @@ async function initFlipbook() {
         const vp0 = firstPage.getViewport({ scale: 1 });
         const ratio = vp0.width / vp0.height;
 
-        let bW = isMobile ? window.innerWidth * 0.95 : Math.min((window.innerHeight * 0.9) * ratio, 900);
+        let bW = isMobile ? window.innerWidth * 0.95 : Math.min((window.innerHeight * 0.8) * ratio, 800);
         let bH = bW / ratio;
 
         document.getElementById('page-count').textContent = pdfDoc.numPages;
 
-        // Inisialisasi DOM halaman
+        // 1. Buat kontainer halaman dan Render SEKALIGUS di awal (Full Pre-rendering)
+        document.getElementById('loading').innerHTML = "Meresolusi Gambar... <br><span id='render-status'>0</span> / " + pdfDoc.numPages;
+        
+        const pagesDom = [];
         for (let i = 1; i <= pdfDoc.numPages; i++) {
             const pageDiv = document.createElement('div');
             pageDiv.className = 'page';
-pageDiv.innerHTML = '';
             bookContainer.appendChild(pageDiv);
+            pagesDom.push(pageDiv);
+            
+            // Render halaman i
+            await renderPage(i, pageDiv);
+            document.getElementById('render-status').textContent = i;
         }
 
+        // 2. Tampilkan Kontainer
         document.getElementById('loading').style.display = 'none';
         document.getElementById('page-info').style.display = 'block';
         bookContainer.style.display = 'block';
 
+        // 3. Inisialisasi Flipbook (dengan halaman yang sudah "jadi")
         pageFlip = new St.PageFlip(bookContainer, {
             width: bW, height: bH, size: "fixed",
             usePortrait: true, showCover: false, flippingTime: 800,
-            drawShadow: true
+            drawShadow: true,
+            startPage: 0
         });
 
         pageFlip.loadFromHTML(document.querySelectorAll(".page"));
 
-        // Langsung render 2 halaman awal
-        const pagesDom = document.querySelectorAll('.page');
-        await renderPage(1, pagesDom[0]);
-        if(pdfDoc.numPages > 1) await renderPage(2, pagesDom[1]);
-
         // EVENT: Saat Halaman Berubah
-        pageFlip.on('flip', async (e) => {
+        pageFlip.on('flip', (e) => {
             const currentIdx = e.data;
             document.getElementById('page-num').textContent = currentIdx + 1;
             
             flipSound.currentTime = 0;
             flipSound.play().catch(() => {});
-
-            // Lazy Load cerdas: Render 1 halaman sebelum dan 2 halaman sesudah
-const toLoad = [
-    currentIdx - 2,
-    currentIdx - 1,
-    currentIdx,
-    currentIdx + 1,
-    currentIdx + 2,
-    currentIdx + 3
-];            toLoad.forEach(idx => {
-                if(idx >= 0 && idx < pdfDoc.numPages) {
-                    renderPage(idx + 1, pagesDom[idx]);
-                }
-            });
         });
 
         document.getElementById('prev-zone').addEventListener('click', () => pageFlip.flipPrev());
@@ -293,10 +289,11 @@ const toLoad = [
 setInterval(tick, 1000);
 tick();
 </script>
+
 <script>
+// Logic Zoom (Pinch) tetap dipertahankan
 let scale = 1;
 let initialDistance = null;
-
 const book = document.getElementById('book');
 
 function getDistance(touches) {
@@ -314,15 +311,10 @@ document.addEventListener('touchstart', (e) => {
 document.addEventListener('touchmove', (e) => {
     if (e.touches.length === 2 && initialDistance) {
         e.preventDefault();
-
         let currentDistance = getDistance(e.touches);
         let zoomFactor = currentDistance / initialDistance;
-
         let newScale = scale * zoomFactor;
-
-        // Batasi zoom
         newScale = Math.max(1, Math.min(newScale, 3));
-
         book.style.transform = `scale(${newScale})`;
     }
 }, { passive: false });
@@ -334,6 +326,7 @@ document.addEventListener('touchend', (e) => {
     }
 });
 </script>
+
 <script src="https://unpkg.com/screenshot-privacy-protect/dist/privacy-protect.min.js"></script>
 <script>
     PrivacyProtect.enable({
